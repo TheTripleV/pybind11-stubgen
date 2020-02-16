@@ -144,7 +144,7 @@ class StubsGenerator(object):
     def fmt_docstring(doc: str) -> str:
         split_doc = doc.splitlines(True)
 
-        if len(doc) == 1:
+        if len(split_doc) == 1:
             return StubsGenerator.indent('"""{}"""'.format(doc))
         else:
             return StubsGenerator.indent('"""{}\n"""'.format(doc))
