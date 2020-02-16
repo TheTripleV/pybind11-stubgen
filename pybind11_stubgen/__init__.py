@@ -137,7 +137,18 @@ class StubsGenerator(object):
 
     @staticmethod
     def indent(line):  # type: (str) -> str
-        return StubsGenerator.INDENT + line
+        return "".join([StubsGenerator.INDENT + seg for seg in line.splitlines(True)])
+        # return StubsGenerator.INDENT + line
+
+    @staticmethod
+    def fmt_docstring(doc: str) -> str:
+        split_doc = doc.splitlines(True)
+
+        if len(doc) == 1:
+            return StubsGenerator.indent('"""{}"""'.format(doc))
+        else:
+            return StubsGenerator.indent('"""{}\n"""'.format(doc))
+
 
     @staticmethod
     def fully_qualified_name(klass):
@@ -358,7 +369,7 @@ class FreeFunctionStubsGenerator(StubsGenerator):
                             % self.fully_qualified_name(self.member)
                         )
                 else:
-                    result.append(self.INDENT + '"""{}"""'.format(docstring))
+                    result.append(self.fmt_docstring(docstring))
                 docstring = None  # don't print docstring for other overloads
             else:
                 result.append(self.INDENT + "pass")
@@ -415,7 +426,7 @@ class ClassMemberStubsGenerator(FreeFunctionStubsGenerator):
                             % self.fully_qualified_name(self.member)
                         )
                 else:
-                    result.append(self.INDENT + '"""{}"""'.format(docstring))
+                    result.append(self.fmt_docstring(docstring))
                 docstring = None  # don't print docstring for other overloads
         return result
 
@@ -454,7 +465,7 @@ class PropertyStubsGenerator(StubsGenerator):
             )
             docstring = self.remove_signatures(self.prop.__doc__)
             if docstring:
-                result.append(self.indent('"""{}"""'.format(docstring)))
+                result.append(self.fmt_docstring(docstring))
             else:
                 result.append(self.indent("pass"))
 
@@ -539,7 +550,7 @@ class ClassStubsGenerator(StubsGenerator):
             "class {class_name}({base_classes_list}):{doc_string}".format(
                 class_name=self.klass.__name__,
                 base_classes_list=", ".join(base_classes_list),
-                doc_string="\n" + self.INDENT + '"""{}"""'.format(self.doc_string)
+                doc_string="\n" + self.fmt_docstring(self.doc_string)
                 if self.doc_string
                 else "",
             ),
