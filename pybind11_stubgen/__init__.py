@@ -17,7 +17,9 @@ import logging
 import sys
 import os
 import re
-from argparse import ArgumentParser
+import argparse
+import yaml
+from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +123,8 @@ def replace_numpy_array(match_obj):
 
 
 class StubsGenerator(object):
+    TYPE_MAP = None
+
     INDENT = " " * 4
 
     GLOBAL_CLASSNAME_REPLACEMENTS = {
@@ -137,17 +141,32 @@ class StubsGenerator(object):
 
     @staticmethod
     def indent(line):  # type: (str) -> str
-        return "".join([StubsGenerator.INDENT + seg for seg in line.splitlines(True)])
-        # return StubsGenerator.INDENT + line
+        # return "".join([StubsGenerator.INDENT + seg for seg in line.splitlines(True)])
+        try:
+            return StubsGenerator.INDENT + line
+        except:
+            print(line)
+            exit(1)
+
 
     @staticmethod
     def fmt_docstring(doc: str) -> str:
-        split_doc = doc.splitlines(True)
+
+        # doc = doc.replace("\n\n", "\n")
+        split_doc = [line.strip() for line in doc.strip().splitlines(True)]
 
         if len(split_doc) == 1:
-            return StubsGenerator.indent('"""{}"""'.format(doc))
+            result = ['"""' + split_doc[0] + '"""']
         else:
-            return StubsGenerator.indent('"""{}\n"""'.format(doc))
+            result = ['"""'] + split_doc + ['"""']
+
+        result = [StubsGenerator.indent(line) for line in result]
+        return result
+        # if len(split_doc) == 1:
+        #     result.extend([])
+        #     return StubsGenerator.indent('"""{}"""'.format(doc))
+        # else:
+        #     return StubsGenerator.indent('"""{}\n"""'.format(doc))
 
 
     @staticmethod
@@ -164,6 +183,10 @@ class StubsGenerator(object):
     def apply_classname_replacements(s):  # type: (str) -> Any
         for k, v in StubsGenerator.GLOBAL_CLASSNAME_REPLACEMENTS.items():
             s = k.sub(v, s)
+
+        for k in StubsGenerator.TYPE_MAP:
+            s = s.replace(k, StubsGenerator.TYPE_MAP[k])
+
         return s
 
     @staticmethod
@@ -336,7 +359,7 @@ class AttributeStubsGenerator(StubsGenerator):
 
 
 class FreeFunctionStubsGenerator(StubsGenerator):
-    def __init__(self, name, free_function, module_name):
+    def __init__(self, name, free_function, module_name, cfg):
         self.name = name
         self.member = free_function
         self.module_name = module_name
@@ -349,6 +372,7 @@ class FreeFunctionStubsGenerator(StubsGenerator):
 
     def to_lines(self):  # type: () -> List[str]
         result = []
+
         docstring = self.remove_signatures(self.member.__doc__)
         for sig in self.signatures:
             if len(self.signatures) > 1:
@@ -369,7 +393,7 @@ class FreeFunctionStubsGenerator(StubsGenerator):
                             % self.fully_qualified_name(self.member)
                         )
                 else:
-                    result.append(self.fmt_docstring(docstring))
+                    result.extend(self.fmt_docstring(docstring))
                 docstring = None  # don't print docstring for other overloads
             else:
                 result.append(self.INDENT + "pass")
@@ -389,9 +413,9 @@ class FreeFunctionStubsGenerator(StubsGenerator):
 
 
 class ClassMemberStubsGenerator(FreeFunctionStubsGenerator):
-    def __init__(self, name, free_function, module_name):
+    def __init__(self, name, free_function, module_name, cfg):
         super(ClassMemberStubsGenerator, self).__init__(
-            name, free_function, module_name
+            name, free_function, module_name, cfg
         )
 
     def to_lines(self):  # type: () -> List[str]
@@ -426,7 +450,7 @@ class ClassMemberStubsGenerator(FreeFunctionStubsGenerator):
                             % self.fully_qualified_name(self.member)
                         )
                 else:
-                    result.append(self.fmt_docstring(docstring))
+                    result.extend(self.fmt_docstring(docstring))
                 docstring = None  # don't print docstring for other overloads
         return result
 
@@ -453,8 +477,9 @@ class PropertyStubsGenerator(StubsGenerator):
             "def {field_name}(self) -> {rtype}:".format(
                 field_name=self.name, rtype=self.signature.rtype
             ),
-            self.indent('"""{}"""'.format(docstring)),
         ]
+
+        result.extend(self.fmt_docstring(docstring))
 
         if self.signature.setter_args != "None":
             result.append("@{field_name}.setter".format(field_name=self.name))
@@ -465,7 +490,7 @@ class PropertyStubsGenerator(StubsGenerator):
             )
             docstring = self.remove_signatures(self.prop.__doc__)
             if docstring:
-                result.append(self.fmt_docstring(docstring))
+                result.extend(self.fmt_docstring(docstring))
             else:
                 result.append(self.indent("pass"))
 
@@ -480,6 +505,7 @@ class ClassStubsGenerator(StubsGenerator):
     def __init__(
         self,
         klass,
+        cfg: Config,
         attributes_blacklist=ATTRIBUTES_BLACKLIST,
         base_class_blacklist=BASE_CLASS_BLACKLIST,
         methods_blacklist=METHODS_BLACKLIST,
@@ -500,14 +526,22 @@ class ClassStubsGenerator(StubsGenerator):
         self.base_class_blacklist = base_class_blacklist
         self.methods_blacklist = methods_blacklist
 
+        self.cfg = cfg
+
     def get_involved_modules_names(self):
         return self.involved_modules_names
 
     def parse(self):
+        # print(self.klass)
         for name, member in inspect.getmembers(self.klass):
+            next_cfg = None
             if inspect.isroutine(member):
+                if self.cfg and name in self.cfg.methods:
+                    next_cfg = self.cfg.methods[name]
+                    if next_cfg.ignore:
+                        continue
                 self.methods.append(
-                    ClassMemberStubsGenerator(name, member, self.klass.__module__)
+                    ClassMemberStubsGenerator(name, member, self.klass.__module__, next_cfg)
                 )
             elif isinstance(member, property):
                 self.properties.append(
@@ -547,14 +581,15 @@ class ClassStubsGenerator(StubsGenerator):
             for b in self.base_classes
         ]
         result = [
-            "class {class_name}({base_classes_list}):{doc_string}".format(
+            "class {class_name}({base_classes_list}):".format(
                 class_name=self.klass.__name__,
                 base_classes_list=", ".join(base_classes_list),
-                doc_string="\n" + self.fmt_docstring(self.doc_string)
-                if self.doc_string
-                else "",
             ),
         ]
+
+        if self.doc_string:
+            result.extend(self.fmt_docstring(self.doc_string))
+
         for f in self.methods:
             if f.name not in self.methods_blacklist:
                 result.extend(map(self.indent, f.to_lines()))
@@ -582,7 +617,7 @@ class ModuleStubsGenerator(StubsGenerator):
     )
 
     def __init__(
-        self, module_or_module_name, attributes_blacklist=ATTRIBUTES_BLACKLIST
+        self, module_or_module_name, cfg: Config, attributes_blacklist=ATTRIBUTES_BLACKLIST
     ):
         if isinstance(module_or_module_name, str):
             self.module = importlib.import_module(module_or_module_name)
@@ -600,12 +635,19 @@ class ModuleStubsGenerator(StubsGenerator):
         self.write_setup_py = False
 
         self.attributes_blacklist = attributes_blacklist
+        self.cfg = cfg
 
     def parse(self):
         logger.info("Parsing '%s' module" % self.module.__name__)
         for name, member in inspect.getmembers(self.module):
+            # print(name, member)
+            next_cfg = None
             if inspect.ismodule(member):
-                m = ModuleStubsGenerator(member)
+                if self.cfg and name in self.cfg.modules:
+                    next_cfg = self.cfg.modules[name]
+                    if next_cfg.ignore:
+                        continue
+                m = ModuleStubsGenerator(member, next_cfg)
                 if m.module.__name__.startswith(self.module.__name__):
                     self.submodules.append(m)
                 else:
@@ -615,11 +657,25 @@ class ModuleStubsGenerator(StubsGenerator):
                         % (m.module.__name__, self.module.__name__)
                     )
             elif inspect.isbuiltin(member) or inspect.isfunction(member):
+                if self.cfg and name in self.cfg.functions:
+                    next_cfg = self.cfg.functions[name]
+                    if next_cfg.ignore:
+                        continue
                 self.free_functions.append(
-                    FreeFunctionStubsGenerator(name, member, self.module.__name__)
+                    FreeFunctionStubsGenerator(name, member, self.module.__name__, next_cfg)
                 )
             elif inspect.isclass(member) or inspect.isclass(member):
-                self.classes.append(ClassStubsGenerator(member))
+                if self.cfg and name in self.cfg.classes:
+                    next_cfg = self.cfg.classes[name]
+                    if next_cfg.ignore:
+                        continue
+                self.classes.append(
+                    ClassStubsGenerator(
+                        member,
+                        next_cfg
+                    )
+                )
+                         
             elif name == "__doc__":
                 self.doc_string = member
             elif name not in self.attributes_blacklist:
@@ -779,7 +835,7 @@ def recursive_mkdir_walker(subdirs, callback):  # type: (List[str], Callable) ->
 
 
 def main():
-    parser = ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="pybind11-stubgen", description="Generates stubs for specified modules"
     )
     parser.add_argument(
@@ -795,10 +851,16 @@ def main():
         help="optional suffix to disambiguate from the " "original package",
     )
     parser.add_argument("--no-setup-py", action="store_true")
-    parser.add_argument(
-        "module_names", nargs="+", metavar="MODULE_NAME", type=str, help="modules names"
-    )
+    # parser.add_argument(
+    #     "module_names", nargs="+", metavar="MODULE_NAME", type=str, help="modules names"
+    # )
     parser.add_argument("--log-level", default="WARNING", help="Set output log level")
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-c", "--config-file", default=None, help="file that species options and parameters")
+    group.add_argument(
+        "-m", "--module_names", nargs="+", metavar="MODULE_NAME", type=str, help="modules names"
+    )
 
     sys_args = parser.parse_args()
 
@@ -816,15 +878,35 @@ def main():
     if not os.path.exists(output_path):
         os.mkdir(output_path)
 
-    with DirectoryWalkerGuard(output_path):
+    cfg = None
+
+    if sys_args.config_file:
+        with open(sys_args.config_file, "r") as cfg_file:
+            yml = yaml.safe_load(cfg_file)
+            cfg = Config(**yml)
+
+    else:
+        cfg = {}
+        cfg['modules'] = {}
         for _module_name in sys_args.module_names:
-            _module = ModuleStubsGenerator(_module_name)
+            cfg['modules'][_module_name] = None
+        cfg['type_map'] = {}
+        cfg = Config(**cfg)
+
+    # StubsGenerator.CFG = cfg
+    StubsGenerator.TYPE_MAP = cfg.type_map
+
+    with DirectoryWalkerGuard(output_path):
+        for _module_name in cfg.modules:
+            _module = ModuleStubsGenerator(_module_name, cfg.modules[_module_name])
             _module.parse()
             _module.stub_suffix = sys_args.root_module_suffix
             _module.write_setup_py = not sys_args.no_setup_py
+            # _module.write()
             recursive_mkdir_walker(
                 _module_name.split(".")[:-1], lambda: _module.write()
             )
+
 
 
 if __name__ == "__main__":
