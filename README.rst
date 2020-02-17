@@ -29,7 +29,8 @@ Install
 
 .. code-block:: bash
 
-   python -m pip install git+https://github.com/sizmailov/pybind11-stubgen.git
+   python setup.py develop
+on this repo
 
 
 
@@ -39,9 +40,8 @@ Usage
 
 .. code-block:: bash
 
-   pybind11-stubgen [-h] [-o OUTPUT_DIR] \
-                    [--root_module_suffix ROOT_MODULE_SUFFIX] \
-                    [--no-setup-py] \
-                    [--log-level LOG_LEVEL] \
-                    MODULE_NAME [MODULE_NAME ...] \
+   python -m pybind11_stubgen -c CONFIG_FILE
+
+
+Example config file at `pbc.yml`
 
