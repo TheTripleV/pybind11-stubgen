@@ -1,0 +1,45 @@
+modules:
+  wpilib.command:
+  wpilib:
+    modules:
+      _wpilib: # Fix Later
+        ignore: True
+    classes:
+      SendableChooser:
+        ignore: True
+      SendableBuilderImpl:
+        ignore: True
+      SendableBuilder:
+        ignore: True
+
+type_map:
+  "wpi::SmallPtrSetImpl<frc::Subsystem * __ptr64>": '"IDK"'
+  "frc::Trigger": Trigger
+  "frc::Command": Command
+  "frc::Subsystem": Subsystem
+  "frc::CommandGroup": CommandGroup
+  "frc::PIDController": PIDController
+  "frc::SendableBuilder": SendableBuilder
+  "frc::SPI::Port": "SPI.Port"
+  "frc::I2C::Port": "SPI.Port"
+  "frc::AnalogInput": "AnalogInput"
+  "hal::Handle<int,0>": "int"
+  
+  "std::thread": "int"
+
+  "seconds": "int" #what is this type?
+
+  # HACK for now
+  "frc::": ""
+
+  "wpi::raw_ostream": "IDK"
+  "std::thread::id": "int"
+  "wpi::StringRef": "str"
+  "wpi::SmallVectorImpl<int>": "IDK"
+
+  #Automate these:
+  "wpilib._wpilib.": "wpilib."
+  "interfaces._interfaces.": "interfaces."
+
+
+  "int::id": int
